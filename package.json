@@ -11,5 +11,9 @@
 	"devDependencies": {
 		"typescript": "^5.0.4",
 		"wrangler": "^4.22.0"
+	},
+	"dependencies": {
+		"langfuse": "^3.37.6",
+		"openai": "^5.8.2"
 	}
 }
