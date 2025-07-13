@@ -32,8 +32,8 @@ type ClassificationResult = {
 
 export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorClassificationParams> {
 	async run(event: WorkflowEvent<RumorClassificationParams>, step: WorkflowStep) {
-		const datasetName = event.payload.datasetName || DATASET_NAME;
-		
+		const datasetName = event.payload.datasetName || this.env.DATASET_NAME;
+
 		// Step 1: Load categories and dataset in parallel
 		const [categories, datasetItems] = await Promise.all([
 			step.do("load-cofacts-categories", async () => {
@@ -56,14 +56,14 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 			}),
 			step.do("load-langfuse-dataset", async () => {
 				const langfuse = new Langfuse({
-					publicKey: LANGFUSE_PUBLIC_KEY,
-					secretKey: LANGFUSE_SECRET_KEY,
-					baseUrl: LANGFUSE_HOST,
+					publicKey: this.env.LANGFUSE_PUBLIC_KEY,
+					secretKey: this.env.LANGFUSE_SECRET_KEY,
+					baseUrl: this.env.LANGFUSE_HOST,
 				});
 
 				try {
 					const dataset = await langfuse.getDataset(datasetName);
-					
+
 					return dataset.items.map((item: any): DatasetItem => ({
 						id: item.id,
 						text: item.input?.text || item.input,
@@ -79,7 +79,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 		// Step 2: Upload batch to OpenAI LLM service
 		const batchUpload = await step.do("upload-batch-to-openai", async () => {
 			const openai = new OpenAI({
-				apiKey: OPENAI_API_KEY,
+				apiKey: this.env.OPENAI_API_KEY,
 			});
 
 			const categoryList = categories.map(cat => `- ${cat.title}`).join('\n');
@@ -113,7 +113,7 @@ Respond with a JSON object containing:
 
 			// Create JSONL content for batch upload
 			const jsonlContent = batchRequests.map((req: any) => JSON.stringify(req)).join('\n');
-			
+
 			// Upload file for batch processing
 			const file = await openai.files.create({
 				file: new File([jsonlContent], 'batch_requests.jsonl', { type: 'application/jsonl' }),
@@ -129,7 +129,7 @@ Respond with a JSON object containing:
 		// Step 3: Trigger OpenAI batch API
 		const batchJob = await step.do("trigger-batch-api", async () => {
 			const openai = new OpenAI({
-				apiKey: OPENAI_API_KEY,
+				apiKey: this.env.OPENAI_API_KEY,
 			});
 
 			const batch = await openai.batches.create({
@@ -162,20 +162,20 @@ Respond with a JSON object containing:
 				});
 
 				const batch = await openai.batches.retrieve(batchJob.batchId);
-				
+
 				if (batch.status === "completed") {
 					// Download and parse results
 					const resultsFile = await openai.files.content(batch.output_file_id!);
 					const resultsText = await resultsFile.text();
-					
+
 					const results: ClassificationResult[] = [];
 					const lines = resultsText.trim().split('\n');
-					
+
 					for (const line of lines) {
 						const response = JSON.parse(line);
 						const content = response.response.body.choices[0].message.content;
 						const classification = JSON.parse(content);
-						
+
 						results.push({
 							id: response.custom_id,
 							category: classification.category,
@@ -205,9 +205,9 @@ Respond with a JSON object containing:
 		// Step 5: Compare results and write to Langfuse
 		const evaluation = await step.do("evaluate-and-log-results", async () => {
 			const langfuse = new Langfuse({
-				publicKey: LANGFUSE_PUBLIC_KEY,
-				secretKey: LANGFUSE_SECRET_KEY,
-				baseUrl: LANGFUSE_HOST,
+				publicKey: this.env.LANGFUSE_PUBLIC_KEY,
+				secretKey: this.env.LANGFUSE_SECRET_KEY,
+				baseUrl: this.env.LANGFUSE_HOST,
 			});
 
 			const evaluationResults = [];
@@ -322,3 +322,15 @@ Respond with a JSON object containing:
 		};
 	}
 }
+export default {
+	async scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
+		// This is a sample implementation.
+		// You can customize the dataset name or other parameters as needed.
+		await env.RUMOR_CLASSIFIER.create({
+			id: crypto.randomUUID(),
+			params: {
+				datasetName: env.DATASET_NAME,
+			},
+		});
+	},
+};

@@ -1,0 +1,12 @@
+# For local development, copy this file to .dev.vars and fill in the actual values.
+# Do not commit .dev.vars to version control.
+
+# Langfuse Project Credentials
+# See https://langfuse.com/docs/get-started
+LANGFUSE_PUBLIC_KEY="pk-lf-..."
+LANGFUSE_SECRET_KEY="sk-lf-..."
+LANGFUSE_HOST="https://cloud.langfuse.com"
+
+# OpenAI API key
+# See https://platform.openai.com/api-keys
+OPENAI_API_KEY="sk-..."
