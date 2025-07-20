@@ -33,7 +33,7 @@ type ClassificationResult = {
 };
 
 function createClassificationRequest(message: Message, categories: CofactsCategory[]) {
-	const categoryList = categories.map(cat => `- ${cat.title}: ${cat.description}`).join('\n');
+	const categoryList = categories.map(cat => `## ${cat.title}\n ${cat.description}`).join('\n\n');
 	return {
 		custom_id: message.id,
 		method: "POST",
@@ -45,11 +45,12 @@ function createClassificationRequest(message: Message, categories: CofactsCatego
 					role: "system",
 					content: `You are a rumor classification expert. Classify the given text into one or more categories from Cofacts.
 
-Available categories:
+# Available categories
 ${categoryList}
 
+# Instructions
 Respond with a JSON object containing:
-- categories: array of exact category titles from the list above. If none of the categories apply, return an empty array.
+- categories: array of exact category titles from the list above. If none of the categories apply, return an empty array. Provide only the titles, not the descriptions.
 - reasoning: brief explanation for the classification choices`
 				},
 				{
