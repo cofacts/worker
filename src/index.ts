@@ -43,7 +43,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 						"Content-Type": "application/json",
 					},
 					body: JSON.stringify({
-						query: "query ListCategories { ListCategories { id title } }"
+						query: "query ListCategories { ListCategories { edges { node { id title } } } }"
 					}),
 				});
 
@@ -51,8 +51,14 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 					throw new Error(`Failed to fetch categories: ${response.statusText}`);
 				}
 
-				const data = await response.json() as { data: { ListCategories: CofactsCategory[] } };
-				return data.data.ListCategories;
+				const data = await response.json() as {
+					data: {
+						ListCategories: {
+							edges: { node: CofactsCategory }[]
+						}
+					}
+				};
+				return data.data.ListCategories.edges.map(edge => edge.node);
 			}),
 			step.do("load-langfuse-dataset", async () => {
 				const langfuse = new Langfuse({
