@@ -27,6 +27,7 @@ type ClassificationResult = {
 	categories: string[];
 	confidence?: number;
 	reasoning?: string;
+	usage?: any;
 };
 
 function createClassificationRequest(message: Message, categoryList: string) {
@@ -224,6 +225,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 						const response = JSON.parse(line);
 						const content = response.response.body.choices[0].message.content;
 						const classification = JSON.parse(content);
+						const usage = response.response.body.usage;
 
 						// Convert category titles to category IDs using the mapping
 						const categoryTitles = classification.categories;
@@ -234,17 +236,13 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 							categories: categoryIds,
 							confidence: classification.confidence,
 							reasoning: classification.reasoning,
+							usage: usage,
 						});
 					}
 
 					return {
 						batchId: batch.id,
 						results,
-						usage: {
-							prompt_tokens: batch.request_counts?.completed || 0,
-							completion_tokens: batch.request_counts?.completed || 0,
-							total_tokens: batch.request_counts?.completed || 0,
-						},
 					};
 				} else if (batch.status === "failed" || batch.status === "expired" || batch.status === "cancelled") {
 					throw new Error(`Batch processing failed with status: ${batch.status}`);
@@ -343,11 +341,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 						confidence: result.confidence,
 						reasoning: result.reasoning,
 					},
-					usage: {
-						promptTokens: Math.floor(batchResult.usage.prompt_tokens / batchResult.results.length),
-						completionTokens: Math.floor(batchResult.usage.completion_tokens / batchResult.results.length),
-						totalTokens: Math.floor(batchResult.usage.total_tokens / batchResult.results.length),
-					},
+					usage: result.usage,
 				});
 
 				// Add score for evaluation
@@ -408,7 +402,6 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 			averageScore: evaluation.averageScore,
 			totalPredictions: evaluation.totalPredictions,
 			categoriesUsed: categories.map(c => c.title),
-			usage: batchResult.usage,
 		};
 	}
 }
