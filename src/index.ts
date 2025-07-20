@@ -386,6 +386,16 @@ Respond with a JSON object containing:
 			};
 		});
 
+		// Report workflow completion
+		console.info(`🎉 Rumor Classification Workflow Completed!
+- Dataset: ${datasetName}
+- Run Name: ${evaluation.runName}
+- Items Processed: ${datasetItems.length}
+- Batch ID: ${batchResult.batchId}
+- Average Score: ${evaluation.averageScore.toFixed(3)}
+- Total Predictions: ${evaluation.totalPredictions}
+- Categories Used: ${categories.length}`);
+
 		return {
 			datasetName,
 			runName: evaluation.runName,
