@@ -70,7 +70,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 				try {
 					const dataset = await langfuse.getDataset(datasetName);
 
-					return dataset.items.map((item: any): DatasetItem => ({
+					return dataset.items.slice(0, 20).map((item: any): DatasetItem => ({
 						id: item.id,
 						text: item.input?.text || item.input,
 						expectedCategory: item.expectedOutput?.category || item.expectedOutput,
