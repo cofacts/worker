@@ -96,11 +96,15 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 	async run(event: WorkflowEvent<RumorClassificationParams>, step: WorkflowStep) {
 		const datasetName = event.payload.datasetName || this.env.DATASET_NAME;
 
-		// Initialize Langfuse client
+		// Initialize clients
 		const langfuse = new Langfuse({
 			publicKey: this.env.LANGFUSE_PUBLIC_KEY,
 			secretKey: this.env.LANGFUSE_SECRET_KEY,
 			baseUrl: this.env.LANGFUSE_HOST,
+		});
+
+		const openai = new OpenAI({
+			apiKey: this.env.OPENAI_API_KEY,
 		});
 
 		// Step 1: Load categories and dataset in parallel
@@ -146,10 +150,6 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 
 		// Step 2: Upload batch to OpenAI LLM service
 		const batchUpload = await step.do("upload-batch-to-openai", async () => {
-			const openai = new OpenAI({
-				apiKey: this.env.OPENAI_API_KEY,
-			});
-
 			const categoryList = categories.map(cat => `- ${cat.title}`).join('\n');
 
 			const batchRequests = messagesToCategorize.map((item: Message) =>
@@ -173,10 +173,6 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 
 		// Step 3: Trigger OpenAI batch API
 		const batchJob = await step.do("trigger-batch-api", async () => {
-			const openai = new OpenAI({
-				apiKey: this.env.OPENAI_API_KEY,
-			});
-
 			const batch = await openai.batches.create({
 				input_file_id: batchUpload.fileId,
 				endpoint: "/v1/chat/completions",
@@ -202,10 +198,6 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 				timeout: "25 hours", // Slightly longer than 24h to account for processing
 			},
 			async () => {
-				const openai = new OpenAI({
-					apiKey: this.env.OPENAI_API_KEY,
-				});
-
 				const batch = await openai.batches.retrieve(batchJob.batchId);
 
 				if (batch.status === "completed") {
