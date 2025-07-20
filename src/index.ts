@@ -14,7 +14,7 @@ type RumorClassificationParams = {
 type DatasetItem = {
 	id: string;
 	text: string;
-	expectedCategory?: string;
+	expectedCategory: string[];
 	metadata?: Record<string, any>;
 };
 
@@ -25,7 +25,7 @@ type CofactsCategory = {
 
 type ClassificationResult = {
 	id: string;
-	category: string;
+	categories: string[];
 	confidence?: number;
 	reasoning?: string;
 };
@@ -43,7 +43,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 						"Content-Type": "application/json",
 					},
 					body: JSON.stringify({
-						query: "query ListCategories { ListCategories { edges { node { id title } } } }"
+						query: "query ListCategories { ListCategories(first: 50) { edges { node { id title } } } }"
 					}),
 				});
 
@@ -73,7 +73,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 					return dataset.items.slice(0, 20).map((item: any): DatasetItem => ({
 						id: item.id,
 						text: item.input?.text || item.input,
-						expectedCategory: item.expectedOutput?.category || item.expectedOutput,
+						expectedCategory: item.expectedOutput, // Always a list of category IDs
 						metadata: item.metadata,
 					}));
 				} catch (error) {
@@ -99,13 +99,15 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 					messages: [
 						{
 							role: "system",
-							content: `You are a rumor classification expert. Classify the given text into one of these categories from Cofacts:
+							content: `You are a rumor classification expert. Classify the given text into one or more categories from Cofacts.
+
+Available categories:
 ${categoryList}
 
 Respond with a JSON object containing:
-- category: the exact category title from the list above
-- confidence: confidence score (0.0-1.0)
-- reasoning: brief explanation for the classification`
+- categories: array of exact category titles from the list above (can select multiple categories that apply)
+- confidence: overall confidence score (0.0-1.0)
+- reasoning: brief explanation for the classification choices`
 						},
 						{
 							role: "user",
@@ -167,6 +169,14 @@ Respond with a JSON object containing:
 					apiKey: this.env.OPENAI_API_KEY,
 				});
 
+				// Create category name to ID mapping for efficient lookup
+				const categoryNameToId: Record<string, string> = {};
+				const categoryIdToName: Record<string, string> = {};
+				categories.forEach(cat => {
+					categoryNameToId[cat.title] = cat.id;
+					categoryIdToName[cat.id] = cat.title;
+				});
+
 				const batch = await openai.batches.retrieve(batchJob.batchId);
 
 				if (batch.status === "completed") {
@@ -182,9 +192,13 @@ Respond with a JSON object containing:
 						const content = response.response.body.choices[0].message.content;
 						const classification = JSON.parse(content);
 
+						// Convert category titles to category IDs using the mapping
+						const categoryTitles = classification.categories || [classification.category]; // backward compatibility
+						const categoryIds = categoryTitles.map((title: string) => categoryNameToId[title] || title).filter(Boolean);
+
 						results.push({
 							id: response.custom_id,
-							category: classification.category,
+							categories: categoryIds,
 							confidence: classification.confidence,
 							reasoning: classification.reasoning,
 						});
@@ -220,9 +234,44 @@ Respond with a JSON object containing:
 			const dataset = await langfuse.getDataset(datasetName);
 			const originalDatasetItems = dataset.items.slice(0, 20); // Same 20 items
 
+			// Create category mappings
+			const categoryIdToName: Record<string, string> = {};
+			categories.forEach(cat => {
+				categoryIdToName[cat.id] = cat.title;
+			});
+
+			// Calculate multi-class accuracy function
+			const calculateMultiClassScore = (expected: string[], predicted: string[]): number => {
+				const expectedSet = new Set(expected);
+				const predictedSet = new Set(predicted);
+
+				// Perfect match gets 1.0
+				if (expectedSet.size === predictedSet.size && [...expectedSet].every(x => predictedSet.has(x))) {
+					return 1.0;
+				}
+
+				// Calculate difference
+				const expectedArray = [...expectedSet];
+				const predictedArray = [...predictedSet];
+				const difference = Math.abs(expectedArray.length - predictedArray.length);
+
+				// If difference is exactly 1 (one extra or one missing), get 0.5
+				if (difference === 1) {
+					const intersection = expectedArray.filter(x => predictedSet.has(x));
+					const maxPossible = Math.max(expectedArray.length, predictedArray.length);
+
+					// Check if it's mostly correct with just one difference
+					if (intersection.length === Math.min(expectedArray.length, predictedArray.length)) {
+						return 0.5;
+					}
+				}
+
+				return 0.0;
+			};
+
 			const runName = `batch-classification-${Date.now()}`;
 			const evaluationResults = [];
-			let correctPredictions = 0;
+			let totalScore = 0;
 			let totalPredictions = 0;
 
 			for (const result of batchResult.results) {
@@ -230,27 +279,41 @@ Respond with a JSON object containing:
 				const datasetItem = originalDatasetItems.find((item: any) => item.id === result.id);
 				if (!originalItem || !datasetItem) continue;
 
-				const isCorrect = originalItem.expectedCategory === result.category;
-				if (isCorrect) correctPredictions++;
+				// Expected categories are always an array of category IDs
+				const expectedCategories = originalItem.expectedCategory;
+
+				const predictedCategories = result.categories;
+				const score = calculateMultiClassScore(expectedCategories, predictedCategories);
+
+				totalScore += score;
 				totalPredictions++;
+
+				// Get category names for metadata
+				const expectedCategoryNames = expectedCategories.map(id => categoryIdToName[id] || id);
+				const predictedCategoryNames = predictedCategories.map(id => categoryIdToName[id] || id);
+				const isCorrect = score === 1.0;
 
 				// Create trace for individual prediction
 				const trace = langfuse.trace({
 					name: "rumor-classification",
 					input: {
 						text: originalItem.text,
-						expectedCategory: originalItem.expectedCategory,
+						expectedCategories: expectedCategoryNames,
+						expectedCategoryIds: expectedCategories,
 					},
 					output: {
-						predictedCategory: result.category,
+						predictedCategories: predictedCategoryNames,
+						predictedCategoryIds: predictedCategories,
 						confidence: result.confidence,
 						reasoning: result.reasoning,
 					},
 					metadata: {
 						datasetName,
 						batchId: batchResult.batchId,
-						correct: isCorrect,
+						score: score,
+						isCorrect: isCorrect,
 						availableCategories: categories.map(c => c.title),
+						datasetItemId: originalItem.id,
 						...originalItem.metadata,
 					},
 				});
@@ -272,7 +335,8 @@ Respond with a JSON object containing:
 						]
 					},
 					output: {
-						category: result.category,
+						categories: predictedCategoryNames,
+						categoryIds: predictedCategories,
 						confidence: result.confidence,
 						reasoning: result.reasoning,
 					},
@@ -285,9 +349,11 @@ Respond with a JSON object containing:
 
 				// Add score for evaluation
 				trace.score({
-					name: "accuracy",
-					value: isCorrect ? 1 : 0,
-					comment: isCorrect ? "Correct prediction" : `Expected: ${originalItem.expectedCategory}, Got: ${result.category}`,
+					name: "multi-class-accuracy",
+					value: score,
+					comment: score === 1.0 ? "Perfect prediction" :
+						score === 0.5 ? "Partial match (1 difference)" :
+						`Expected: ${expectedCategoryNames.join(', ')}, Got: ${predictedCategoryNames.join(', ')}`,
 				});
 
 				// Link trace to dataset item for experiment tracking
@@ -302,9 +368,9 @@ Respond with a JSON object containing:
 
 				evaluationResults.push({
 					id: result.id,
-					expected: originalItem.expectedCategory,
-					predicted: result.category,
-					correct: isCorrect,
+					expected: expectedCategories,
+					predicted: predictedCategories,
+					score: score,
 					confidence: result.confidence,
 				});
 			}
@@ -313,8 +379,8 @@ Respond with a JSON object containing:
 
 			return {
 				runName,
-				accuracy: correctPredictions / totalPredictions,
-				correctPredictions,
+				accuracy: totalScore / totalPredictions,
+				averageScore: totalScore / totalPredictions,
 				totalPredictions,
 				evaluationResults,
 			};
@@ -326,7 +392,7 @@ Respond with a JSON object containing:
 			itemsProcessed: datasetItems.length,
 			batchId: batchResult.batchId,
 			accuracy: evaluation.accuracy,
-			correctPredictions: evaluation.correctPredictions,
+			averageScore: evaluation.averageScore,
 			totalPredictions: evaluation.totalPredictions,
 			categoriesUsed: categories.map(c => c.title),
 			usage: batchResult.usage,
