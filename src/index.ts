@@ -24,9 +24,11 @@ type CofactsCategory = {
 
 type ClassificationResult = {
 	id: string;
-	categories: string[];
-	confidence?: number;
-	reasoning?: string;
+	classification: {
+		categories: string[];
+		confidence?: number;
+		reasoning?: string;
+	};
 	usage?: any;
 };
 
@@ -228,16 +230,10 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 						const classification = JSON.parse(content);
 						const usage = response.response.body.usage;
 
-						// Convert category titles to category IDs using the mapping
-						const categoryTitles = classification.categories;
-						const categoryIds = categoryTitles.map((title: string) => categoryNameToId[title] || title).filter(Boolean);
-
 						results.push({
 							id: response.custom_id,
-							categories: categoryIds,
-							confidence: classification.confidence,
-							reasoning: classification.reasoning,
-							usage: usage,
+							classification,
+							usage,
 						});
 					}
 
@@ -262,8 +258,10 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 
 			// Create category mappings
 			const categoryIdToName: Record<string, string> = {};
+			const categoryNameToId: Record<string, string> = {};
 			categories.forEach(cat => {
 				categoryIdToName[cat.id] = cat.title;
+				categoryNameToId[cat.title] = cat.id;
 			});
 
 			const runName = `batch-classification-${Date.now()}`;
@@ -286,7 +284,8 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 				// Get expected categories from original dataset item
 				const expectedCategories = datasetItem.expectedOutput as string[]; // Always a list of category IDs
 
-				const predictedCategories = result.categories;
+				// Convert predicted category titles to category IDs for comparison
+				const predictedCategories = result.classification.categories.map((title: string) => categoryNameToId[title] || title).filter(Boolean);
 				const score = calculateMultiClassScore(expectedCategories, predictedCategories);
 
 				totalScore += score;
@@ -294,7 +293,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 
 				// Get category names for metadata
 				const expectedCategoryNames = expectedCategories.map(id => categoryIdToName[id] || id);
-				const predictedCategoryNames = predictedCategories.map(id => categoryIdToName[id] || id);
+				const predictedCategoryNames = result.classification.categories; // These are already titles from step 4
 				const isCorrect = score === 1.0;
 
 				// Create trace for individual prediction
@@ -308,8 +307,8 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 					output: {
 						predictedCategories: predictedCategoryNames,
 						predictedCategoryIds: predictedCategories,
-						confidence: result.confidence,
-						reasoning: result.reasoning,
+						confidence: result.classification.confidence,
+						reasoning: result.classification.reasoning,
 					},
 					metadata: {
 						datasetName,
@@ -333,8 +332,8 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 					output: {
 						categories: predictedCategoryNames,
 						categoryIds: predictedCategories,
-						confidence: result.confidence,
-						reasoning: result.reasoning,
+						confidence: result.classification.confidence,
+						reasoning: result.classification.reasoning,
 					},
 					usage: result.usage,
 				});
@@ -363,7 +362,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 					expected: expectedCategories,
 					predicted: predictedCategories,
 					score: score,
-					confidence: result.confidence,
+					confidence: result.classification.confidence,
 				});
 			}
 
