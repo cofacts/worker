@@ -101,6 +101,8 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 
 	IGNORE_DATASET_ITEMS_WITH_CATEGORY = 'oD2o7nEBrIRcahlYFgpm'; // 只有網址其他資訊不足 🚧
 
+	DATASET_SLICE_SIZE = 10000;
+
 	async run(event: WorkflowEvent<RumorClassificationParams>, step: WorkflowStep) {
 		const datasetName = event.payload.datasetName || this.env.DATASET_NAME;
 
@@ -146,7 +148,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 				try {
 					const dataset = await langfuse.getDataset(datasetName);
 
-					const items = dataset.items.slice(0, 20);
+					const items = dataset.items.slice(0, this.DATASET_SLICE_SIZE);
 					const filteredItems = items.filter((item: any) => {
 						const expected = (item.expectedOutput as string[]) || [];
 						return !expected.includes(this.IGNORE_DATASET_ITEMS_WITH_CATEGORY);
@@ -250,7 +252,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 		const evaluation = await step.do("evaluate-and-log-results", async () => {
 			// Reload dataset to get original items with .link() method
 			const dataset = await langfuse.getDataset(datasetName);
-			const originalDatasetItems = dataset.items.slice(0, 20); // Same 20 items
+			const originalDatasetItems = dataset.items.slice(0, this.DATASET_SLICE_SIZE);
 
 			// Create category mappings
 			const categoryIdToName: Record<string, string> = {};
