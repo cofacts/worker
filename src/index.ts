@@ -216,19 +216,25 @@ Respond with a JSON object containing:
 				baseUrl: this.env.LANGFUSE_HOST,
 			});
 
+			// Reload dataset to get original items with .link() method
+			const dataset = await langfuse.getDataset(datasetName);
+			const originalDatasetItems = dataset.items.slice(0, 20); // Same 20 items
+
+			const runName = `batch-classification-${Date.now()}`;
 			const evaluationResults = [];
 			let correctPredictions = 0;
 			let totalPredictions = 0;
 
 			for (const result of batchResult.results) {
 				const originalItem = datasetItems.find((item: DatasetItem) => item.id === result.id);
-				if (!originalItem) continue;
+				const datasetItem = originalDatasetItems.find((item: any) => item.id === result.id);
+				if (!originalItem || !datasetItem) continue;
 
 				const isCorrect = originalItem.expectedCategory === result.category;
 				if (isCorrect) correctPredictions++;
 				totalPredictions++;
 
-				// Log individual prediction to Langfuse
+				// Create trace for individual prediction
 				const trace = langfuse.trace({
 					name: "rumor-classification",
 					input: {
@@ -277,6 +283,23 @@ Respond with a JSON object containing:
 					},
 				});
 
+				// Add score for evaluation
+				trace.score({
+					name: "accuracy",
+					value: isCorrect ? 1 : 0,
+					comment: isCorrect ? "Correct prediction" : `Expected: ${originalItem.expectedCategory}, Got: ${result.category}`,
+				});
+
+				// Link trace to dataset item for experiment tracking
+				await datasetItem.link(trace, runName, {
+					description: `Batch classification experiment using OpenAI gpt-4o-mini`,
+					metadata: {
+						batchId: batchResult.batchId,
+						model: "gpt-4o-mini",
+						totalItems: datasetItems.length
+					},
+				});
+
 				evaluationResults.push({
 					id: result.id,
 					expected: originalItem.expectedCategory,
@@ -286,29 +309,10 @@ Respond with a JSON object containing:
 				});
 			}
 
-			// Log overall experiment results
-			langfuse.trace({
-				name: "batch-classification-experiment",
-				input: {
-					datasetName,
-					totalItems: datasetItems.length,
-					categories: categories.map(c => c.title),
-				},
-				output: {
-					accuracy: correctPredictions / totalPredictions,
-					correctPredictions,
-					totalPredictions,
-					batchId: batchResult.batchId,
-				},
-				metadata: {
-					usage: batchResult.usage,
-					evaluationResults,
-				},
-			});
-
 			await langfuse.flushAsync();
 
 			return {
+				runName,
 				accuracy: correctPredictions / totalPredictions,
 				correctPredictions,
 				totalPredictions,
@@ -318,6 +322,7 @@ Respond with a JSON object containing:
 
 		return {
 			datasetName,
+			runName: evaluation.runName,
 			itemsProcessed: datasetItems.length,
 			batchId: batchResult.batchId,
 			accuracy: evaluation.accuracy,
