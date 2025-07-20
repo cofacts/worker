@@ -206,14 +206,6 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 					apiKey: this.env.OPENAI_API_KEY,
 				});
 
-				// Create category name to ID mapping for efficient lookup
-				const categoryNameToId: Record<string, string> = {};
-				const categoryIdToName: Record<string, string> = {};
-				categories.forEach(cat => {
-					categoryNameToId[cat.title] = cat.id;
-					categoryIdToName[cat.id] = cat.title;
-				});
-
 				const batch = await openai.batches.retrieve(batchJob.batchId);
 
 				if (batch.status === "completed") {
