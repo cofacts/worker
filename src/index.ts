@@ -26,7 +26,6 @@ type ClassificationResult = {
 	id: string;
 	classification: {
 		categories: string[];
-		confidence?: number;
 		reasoning?: string;
 	};
 	usage?: any;
@@ -48,8 +47,7 @@ Available categories:
 ${categoryList}
 
 Respond with a JSON object containing:
-- categories: array of exact category titles from the list above (can select multiple categories that apply)
-- confidence: overall confidence score (0.0-1.0)
+- categories: array of exact category titles from the list above. If none of the categories apply, return an empty array.
 - reasoning: brief explanation for the classification choices`
 				},
 				{
@@ -288,7 +286,6 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 					output: {
 						predictedCategories: predictedCategoryNames,
 						predictedCategoryIds: predictedCategories,
-						confidence: result.classification.confidence,
 						reasoning: result.classification.reasoning,
 					},
 					metadata: {
@@ -318,7 +315,6 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 					output: {
 						categories: predictedCategoryNames,
 						categoryIds: predictedCategories,
-						confidence: result.classification.confidence,
 						reasoning: result.classification.reasoning,
 					},
 					usage: result.usage,
@@ -348,7 +344,6 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 					expected: expectedCategories,
 					predicted: predictedCategories,
 					score: score,
-					confidence: result.classification.confidence,
 				});
 			}
 
