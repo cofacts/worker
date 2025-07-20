@@ -94,6 +94,13 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 	async run(event: WorkflowEvent<RumorClassificationParams>, step: WorkflowStep) {
 		const datasetName = event.payload.datasetName || this.env.DATASET_NAME;
 
+		// Initialize Langfuse client
+		const langfuse = new Langfuse({
+			publicKey: this.env.LANGFUSE_PUBLIC_KEY,
+			secretKey: this.env.LANGFUSE_SECRET_KEY,
+			baseUrl: this.env.LANGFUSE_HOST,
+		});
+
 		// Step 1: Load categories and dataset in parallel
 		const [categories, messagesToCategorize] = await Promise.all([
 			step.do("load-cofacts-categories", async () => {
@@ -121,12 +128,6 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 				return data.data.ListCategories.edges.map(edge => edge.node);
 			}),
 			step.do("load-messages-to-categorize", async () => {
-				const langfuse = new Langfuse({
-					publicKey: this.env.LANGFUSE_PUBLIC_KEY,
-					secretKey: this.env.LANGFUSE_SECRET_KEY,
-					baseUrl: this.env.LANGFUSE_HOST,
-				});
-
 				try {
 					const dataset = await langfuse.getDataset(datasetName);
 
@@ -255,12 +256,6 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 
 		// Step 5: Compare results and write to Langfuse
 		const evaluation = await step.do("evaluate-and-log-results", async () => {
-			const langfuse = new Langfuse({
-				publicKey: this.env.LANGFUSE_PUBLIC_KEY,
-				secretKey: this.env.LANGFUSE_SECRET_KEY,
-				baseUrl: this.env.LANGFUSE_HOST,
-			});
-
 			// Reload dataset to get original items with .link() method
 			const dataset = await langfuse.getDataset(datasetName);
 			const originalDatasetItems = dataset.items.slice(0, 20); // Same 20 items
