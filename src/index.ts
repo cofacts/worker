@@ -226,7 +226,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 						const classification = JSON.parse(content);
 
 						// Convert category titles to category IDs using the mapping
-						const categoryTitles = classification.categories || [classification.category]; // backward compatibility
+						const categoryTitles = classification.categories;
 						const categoryIds = categoryTitles.map((title: string) => categoryNameToId[title] || title).filter(Boolean);
 
 						results.push({
