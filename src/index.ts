@@ -29,6 +29,66 @@ type ClassificationResult = {
 	reasoning?: string;
 };
 
+function createClassificationRequest(message: Message, categoryList: string) {
+	return {
+		custom_id: message.id,
+		method: "POST",
+		url: "/v1/chat/completions",
+		body: {
+			model: "gpt-4o-mini",
+			messages: [
+				{
+					role: "system",
+					content: `You are a rumor classification expert. Classify the given text into one or more categories from Cofacts.
+
+Available categories:
+${categoryList}
+
+Respond with a JSON object containing:
+- categories: array of exact category titles from the list above (can select multiple categories that apply)
+- confidence: overall confidence score (0.0-1.0)
+- reasoning: brief explanation for the classification choices`
+				},
+				{
+					role: "user",
+					content: `Classify this rumor article: ${message.text}`
+				}
+			],
+			response_format: { type: "json_object" },
+			temperature: 0.1,
+		}
+	};
+}
+
+// Calculate multi-class accuracy function
+function calculateMultiClassScore(expected: string[], predicted: string[]): number {
+	const expectedSet = new Set(expected);
+	const predictedSet = new Set(predicted);
+
+	// Perfect match gets 1.0
+	if (expectedSet.size === predictedSet.size && [...expectedSet].every(x => predictedSet.has(x))) {
+		return 1.0;
+	}
+
+	// Calculate difference
+	const expectedArray = [...expectedSet];
+	const predictedArray = [...predictedSet];
+	const difference = Math.abs(expectedArray.length - predictedArray.length);
+
+	// If difference is exactly 1 (one extra or one missing), get 0.5
+	if (difference === 1) {
+		const intersection = expectedArray.filter(x => predictedSet.has(x));
+		const maxPossible = Math.max(expectedArray.length, predictedArray.length);
+
+		// Check if it's mostly correct with just one difference
+		if (intersection.length === Math.min(expectedArray.length, predictedArray.length)) {
+			return 0.5;
+		}
+	}
+
+	return 0.0;
+}
+
 export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorClassificationParams> {
 	async run(event: WorkflowEvent<RumorClassificationParams>, step: WorkflowStep) {
 		const datasetName = event.payload.datasetName || this.env.DATASET_NAME;
@@ -59,7 +119,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 				};
 				return data.data.ListCategories.edges.map(edge => edge.node);
 			}),
-			step.do("load-langfuse-dataset", async () => {
+			step.do("load-messages-to-categorize", async () => {
 				const langfuse = new Langfuse({
 					publicKey: this.env.LANGFUSE_PUBLIC_KEY,
 					secretKey: this.env.LANGFUSE_SECRET_KEY,
@@ -88,34 +148,9 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 
 			const categoryList = categories.map(cat => `- ${cat.title}`).join('\n');
 
-			const batchRequests = messagesToCategorize.map((item: Message) => ({
-				custom_id: item.id,
-				method: "POST",
-				url: "/v1/chat/completions",
-				body: {
-					model: "gpt-4o-mini",
-					messages: [
-						{
-							role: "system",
-							content: `You are a rumor classification expert. Classify the given text into one or more categories from Cofacts.
-
-Available categories:
-${categoryList}
-
-Respond with a JSON object containing:
-- categories: array of exact category titles from the list above (can select multiple categories that apply)
-- confidence: overall confidence score (0.0-1.0)
-- reasoning: brief explanation for the classification choices`
-						},
-						{
-							role: "user",
-							content: `Classify this rumor article: ${item.text}`
-						}
-					],
-					response_format: { type: "json_object" },
-					temperature: 0.1,
-				}
-			}));
+			const batchRequests = messagesToCategorize.map((item: Message) =>
+				createClassificationRequest(item, categoryList)
+			);
 
 			// Create JSONL content for batch upload
 			const jsonlContent = batchRequests.map((req: any) => JSON.stringify(req)).join('\n');
@@ -238,35 +273,6 @@ Respond with a JSON object containing:
 				categoryIdToName[cat.id] = cat.title;
 			});
 
-			// Calculate multi-class accuracy function
-			const calculateMultiClassScore = (expected: string[], predicted: string[]): number => {
-				const expectedSet = new Set(expected);
-				const predictedSet = new Set(predicted);
-
-				// Perfect match gets 1.0
-				if (expectedSet.size === predictedSet.size && [...expectedSet].every(x => predictedSet.has(x))) {
-					return 1.0;
-				}
-
-				// Calculate difference
-				const expectedArray = [...expectedSet];
-				const predictedArray = [...predictedSet];
-				const difference = Math.abs(expectedArray.length - predictedArray.length);
-
-				// If difference is exactly 1 (one extra or one missing), get 0.5
-				if (difference === 1) {
-					const intersection = expectedArray.filter(x => predictedSet.has(x));
-					const maxPossible = Math.max(expectedArray.length, predictedArray.length);
-
-					// Check if it's mostly correct with just one difference
-					if (intersection.length === Math.min(expectedArray.length, predictedArray.length)) {
-						return 0.5;
-					}
-				}
-
-				return 0.0;
-			};
-
 			const runName = `batch-classification-${Date.now()}`;
 			const evaluationResults = [];
 			let totalScore = 0;
@@ -324,20 +330,12 @@ Respond with a JSON object containing:
 				});
 
 				// Add generation span for the LLM call
+				const requestObj = createClassificationRequest(message, categories.map(cat => `- ${cat.title}`).join('\n'));
 				trace.generation({
 					name: "openai-classification",
 					model: "gpt-4o-mini",
 					input: {
-						messages: [
-							{
-								role: "system",
-								content: "You are a rumor classification expert..."
-							},
-							{
-								role: "user",
-								content: `Classify this rumor article: ${message.text}`
-							}
-						]
+						messages: requestObj.body.messages
 					},
 					output: {
 						categories: predictedCategoryNames,
