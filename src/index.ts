@@ -20,6 +20,7 @@ type Message = {
 type CofactsCategory = {
 	id: string;
 	title: string;
+	description: string;
 };
 
 type ClassificationResult = {
@@ -31,7 +32,8 @@ type ClassificationResult = {
 	usage?: any;
 };
 
-function createClassificationRequest(message: Message, categoryList: string) {
+function createClassificationRequest(message: Message, categories: CofactsCategory[]) {
+	const categoryList = categories.map(cat => `- ${cat.title}: ${cat.description}`).join('\n');
 	return {
 		custom_id: message.id,
 		method: "POST",
@@ -111,7 +113,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 						"Content-Type": "application/json",
 					},
 					body: JSON.stringify({
-						query: "query ListCategories { ListCategories(first: 50) { edges { node { id title } } } }"
+						query: "query ListCategories { ListCategories(first: 50) { edges { node { id title description } } } }"
 					}),
 				});
 
@@ -145,10 +147,8 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 
 		// Step 2: Upload batch to OpenAI LLM service
 		const batchUpload = await step.do("upload-batch-to-openai", async () => {
-			const categoryList = categories.map(cat => `- ${cat.title}`).join('\n');
-
 			const batchRequests = messagesToCategorize.map((item: Message) =>
-				createClassificationRequest(item, categoryList)
+				createClassificationRequest(item, categories)
 			);
 
 			// Create JSONL content for batch upload
@@ -293,14 +293,13 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 						batchId: batchResult.batch.id,
 						score: score,
 						isCorrect: isCorrect,
-						availableCategories: categories.map(c => c.title),
 						datasetItemId: message.id,
 						...message.metadata,
 					},
 				});
 
 				// Add generation span for the LLM call
-				const requestObj = createClassificationRequest(message, categories.map(cat => `- ${cat.title}`).join('\n'));
+				const requestObj = createClassificationRequest(message, categories);
 				const { created_at, completed_at, failed_at, expired_at } = batchResult.batch;
 				const endTime = completed_at || failed_at || expired_at;
 
