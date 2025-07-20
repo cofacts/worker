@@ -96,6 +96,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 		'nT2n7nEBrIRcahlY6QqF', // 有意義但不包含在以上標籤 🚧
 		'lj2m7nEBrIRcahlY6Ao_', // 基本人權問題 🚧
 		'kz3c7XEBrIRcahlYxAp6', // 性少數與愛滋病 🚧
+		'oD2o7nEBrIRcahlYFgpm', // 只有網址其他資訊不足 🚧
 	]);
 
 	IGNORE_DATASET_ITEMS_WITH_CATEGORY = 'oD2o7nEBrIRcahlYFgpm'; // 只有網址其他資訊不足 🚧
