@@ -68,23 +68,20 @@ function calculateMultiClassScore(expected: string[], predicted: string[]): numb
 	const expectedSet = new Set(expected);
 	const predictedSet = new Set(predicted);
 
-	// Perfect match gets 1.0
-	if (expectedSet.size === predictedSet.size && [...expectedSet].every(x => predictedSet.has(x))) {
+	// Perfect match gets 1.0 - use Set intersection to check equality
+	const intersection = expectedSet.intersection(predictedSet);
+	if (expectedSet.size === predictedSet.size && intersection.size === expectedSet.size) {
 		return 1.0;
 	}
 
-	// Calculate difference
-	const expectedArray = [...expectedSet];
-	const predictedArray = [...predictedSet];
-	const difference = Math.abs(expectedArray.length - predictedArray.length);
+	// Calculate size difference
+	const difference = Math.abs(expectedSet.size - predictedSet.size);
 
 	// If difference is exactly 1 (one extra or one missing), get 0.5
 	if (difference === 1) {
-		const intersection = expectedArray.filter(x => predictedSet.has(x));
-		const maxPossible = Math.max(expectedArray.length, predictedArray.length);
-
-		// Check if it's mostly correct with just one difference
-		if (intersection.length === Math.min(expectedArray.length, predictedArray.length)) {
+		// Check if intersection covers the smaller set completely
+		const minSize = Math.min(expectedSet.size, predictedSet.size);
+		if (intersection.size === minSize) {
 			return 0.5;
 		}
 	}
