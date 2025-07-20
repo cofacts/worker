@@ -2,15 +2,11 @@
 
 Cloudflare worker for Cofacts' asynchronous tasks.
 
-## Workflows
-
-### Rumor Classification
+## Rumor Classification
 
 This workflow classifies rumors using OpenAI's batch API and logs the results to Langfuse for evaluation.
 
-#### Local Testing
-
-To test the rumor classification workflow locally:
+### One-time Setup
 
 1.  **Install dependencies:**
     ```bash
@@ -29,7 +25,11 @@ To test the rumor classification workflow locally:
 
     You can also set `LANGFUSE_HOST` if you are using a self-hosted Langfuse instance.
 
-3.  **Start the development server:**
+### Local Testing
+
+To test the rumor classification workflow locally:
+
+1.  **Start the development server:**
 
     The `--test-scheduled` flag is required to test the `scheduled` handler locally.
 
@@ -37,7 +37,7 @@ To test the rumor classification workflow locally:
     npx wrangler dev --test-scheduled
     ```
 
-4.  **Trigger the workflow:**
+2.  **Trigger the workflow:**
 
     Open a new terminal and run the following command to trigger the scheduled event:
 
@@ -45,7 +45,7 @@ To test the rumor classification workflow locally:
     curl -X POST "http://localhost:8787/__scheduled?cron=*+*+*+*+*"
     ```
 
-5.  **Monitor the workflow:**
+3.  **Monitor the workflow:**
 
     The workflow will start and you can monitor its progress in the `wrangler dev` terminal. The workflow will poll OpenAI's batch API until the classification is complete.
 
