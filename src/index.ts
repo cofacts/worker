@@ -11,10 +11,9 @@ type RumorClassificationParams = {
 	batchSize?: number;
 };
 
-type DatasetItem = {
+type Message = {
 	id: string;
 	text: string;
-	expectedCategory: string[];
 	metadata?: Record<string, any>;
 };
 
@@ -35,7 +34,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 		const datasetName = event.payload.datasetName || this.env.DATASET_NAME;
 
 		// Step 1: Load categories and dataset in parallel
-		const [categories, datasetItems] = await Promise.all([
+		const [categories, messagesToCategorize] = await Promise.all([
 			step.do("load-cofacts-categories", async () => {
 				const response = await fetch("https://api.cofacts.tw/graphql", {
 					method: "POST",
@@ -70,10 +69,9 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 				try {
 					const dataset = await langfuse.getDataset(datasetName);
 
-					return dataset.items.slice(0, 20).map((item: any): DatasetItem => ({
+					return dataset.items.slice(0, 20).map((item: any): Message => ({
 						id: item.id,
 						text: item.input?.text || item.input,
-						expectedCategory: item.expectedOutput, // Always a list of category IDs
 						metadata: item.metadata,
 					}));
 				} catch (error) {
@@ -90,7 +88,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 
 			const categoryList = categories.map(cat => `- ${cat.title}`).join('\n');
 
-			const batchRequests = datasetItems.map((item: DatasetItem) => ({
+			const batchRequests = messagesToCategorize.map((item: Message) => ({
 				custom_id: item.id,
 				method: "POST",
 				url: "/v1/chat/completions",
@@ -158,8 +156,8 @@ Respond with a JSON object containing:
 			"poll-batch-completion",
 			{
 				retries: {
-					limit: 1440, // 24 hours * 60 minutes
-					delay: "1 minute",
+					limit: 720, // 24 hours / 2 minutes = 720 retries
+					delay: "2 minutes",
 					backoff: "constant",
 				},
 				timeout: "25 hours", // Slightly longer than 24h to account for processing
@@ -274,13 +272,20 @@ Respond with a JSON object containing:
 			let totalScore = 0;
 			let totalPredictions = 0;
 
-			for (const result of batchResult.results) {
-				const originalItem = datasetItems.find((item: DatasetItem) => item.id === result.id);
-				const datasetItem = originalDatasetItems.find((item: any) => item.id === result.id);
-				if (!originalItem || !datasetItem) continue;
+			// Create ID-to-item mappings for O(1) lookup
+			const messageById = new Map<string, Message>();
+			messagesToCategorize.forEach(item => messageById.set(item.id, item));
 
-				// Expected categories are always an array of category IDs
-				const expectedCategories = originalItem.expectedCategory;
+			const datasetItemById = new Map<string, any>();
+			originalDatasetItems.forEach(item => datasetItemById.set(item.id, item));
+
+			for (const result of batchResult.results) {
+				const message = messageById.get(result.id);
+				const datasetItem = datasetItemById.get(result.id);
+				if (!message || !datasetItem) continue;
+
+				// Get expected categories from original dataset item
+				const expectedCategories = datasetItem.expectedOutput as string[]; // Always a list of category IDs
 
 				const predictedCategories = result.categories;
 				const score = calculateMultiClassScore(expectedCategories, predictedCategories);
@@ -297,7 +302,7 @@ Respond with a JSON object containing:
 				const trace = langfuse.trace({
 					name: "rumor-classification",
 					input: {
-						text: originalItem.text,
+						text: message.text,
 						expectedCategories: expectedCategoryNames,
 						expectedCategoryIds: expectedCategories,
 					},
@@ -313,8 +318,8 @@ Respond with a JSON object containing:
 						score: score,
 						isCorrect: isCorrect,
 						availableCategories: categories.map(c => c.title),
-						datasetItemId: originalItem.id,
-						...originalItem.metadata,
+						datasetItemId: message.id,
+						...message.metadata,
 					},
 				});
 
@@ -330,7 +335,7 @@ Respond with a JSON object containing:
 							},
 							{
 								role: "user",
-								content: `Classify this rumor article: ${originalItem.text}`
+								content: `Classify this rumor article: ${message.text}`
 							}
 						]
 					},
@@ -362,7 +367,7 @@ Respond with a JSON object containing:
 					metadata: {
 						batchId: batchResult.batchId,
 						model: "gpt-4o-mini",
-						totalItems: datasetItems.length
+						totalItems: messagesToCategorize.length
 					},
 				});
 
@@ -390,7 +395,7 @@ Respond with a JSON object containing:
 		console.info(`🎉 Rumor Classification Workflow Completed!
 - Dataset: ${datasetName}
 - Run Name: ${evaluation.runName}
-- Items Processed: ${datasetItems.length}
+- Items Processed: ${messagesToCategorize.length}
 - Batch ID: ${batchResult.batchId}
 - Average Score: ${evaluation.averageScore.toFixed(3)}
 - Total Predictions: ${evaluation.totalPredictions}
@@ -399,7 +404,7 @@ Respond with a JSON object containing:
 		return {
 			datasetName,
 			runName: evaluation.runName,
-			itemsProcessed: datasetItems.length,
+			itemsProcessed: messagesToCategorize.length,
 			batchId: batchResult.batchId,
 			accuracy: evaluation.accuracy,
 			averageScore: evaluation.averageScore,
