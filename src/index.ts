@@ -219,7 +219,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 					}
 
 					return {
-						batchId: batch.id,
+						batch,
 						results,
 					};
 				} else if (batch.status === "failed" || batch.status === "expired" || batch.status === "cancelled") {
@@ -293,7 +293,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 					},
 					metadata: {
 						datasetName,
-						batchId: batchResult.batchId,
+						batchId: batchResult.batch.id,
 						score: score,
 						isCorrect: isCorrect,
 						availableCategories: categories.map(c => c.title),
@@ -304,8 +304,13 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 
 				// Add generation span for the LLM call
 				const requestObj = createClassificationRequest(message, categories.map(cat => `- ${cat.title}`).join('\n'));
+				const { created_at, completed_at, failed_at, expired_at } = batchResult.batch;
+				const endTime = completed_at || failed_at || expired_at;
+
 				trace.generation({
 					name: "openai-classification",
+					startTime: new Date(created_at * 1000),
+					endTime: endTime ? new Date(endTime * 1000) : undefined,
 					model: "gpt-4o-mini",
 					input: {
 						messages: requestObj.body.messages
@@ -332,7 +337,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 				await datasetItem.link(trace, runName, {
 					description: `Batch classification experiment using OpenAI gpt-4o-mini`,
 					metadata: {
-						batchId: batchResult.batchId,
+						batchId: batchResult.batch.id,
 						model: "gpt-4o-mini",
 						totalItems: messagesToCategorize.length
 					},
@@ -363,7 +368,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 - Dataset: ${datasetName}
 - Run Name: ${evaluation.runName}
 - Items Processed: ${messagesToCategorize.length}
-- Batch ID: ${batchResult.batchId}
+- Batch ID: ${batchResult.batch.id}
 - Average Score: ${evaluation.averageScore.toFixed(3)}
 - Total Predictions: ${evaluation.totalPredictions}
 - Categories Used: ${categories.length}`);
@@ -372,7 +377,7 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 			datasetName,
 			runName: evaluation.runName,
 			itemsProcessed: messagesToCategorize.length,
-			batchId: batchResult.batchId,
+			batchId: batchResult.batch.id,
 			accuracy: evaluation.accuracy,
 			averageScore: evaluation.averageScore,
 			totalPredictions: evaluation.totalPredictions,
