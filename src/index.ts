@@ -90,6 +90,15 @@ function calculateMultiClassScore(expected: string[], predicted: string[]): numb
 }
 
 export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorClassificationParams> {
+	SKIPPED_CATEGORY_IDS = new Set([
+		'nj2n7nEBrIRcahlY-gpc', // 無意義 🚧
+		'nT2n7nEBrIRcahlY6QqF', // 有意義但不包含在以上標籤 🚧
+		'lj2m7nEBrIRcahlY6Ao_', // 基本人權問題 🚧
+		'kz3c7XEBrIRcahlYxAp6', // 性少數與愛滋病 🚧
+	]);
+
+	IGNORE_DATASET_ITEMS_WITH_CATEGORY = 'oD2o7nEBrIRcahlYFgpm'; // 只有網址其他資訊不足 🚧
+
 	async run(event: WorkflowEvent<RumorClassificationParams>, step: WorkflowStep) {
 		const datasetName = event.payload.datasetName || this.env.DATASET_NAME;
 
@@ -128,13 +137,19 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 						}
 					}
 				};
-				return data.data.ListCategories.edges.map(edge => edge.node);
+				const allCategories = data.data.ListCategories.edges.map(edge => edge.node);
+				return allCategories.filter(cat => !this.SKIPPED_CATEGORY_IDS.has(cat.id));
 			}),
 			step.do("load-messages-to-categorize", async () => {
 				try {
 					const dataset = await langfuse.getDataset(datasetName);
 
-					return dataset.items.slice(0, 20).map((item: any): Message => ({
+					const items = dataset.items.slice(0, 20);
+					const filteredItems = items.filter((item: any) => {
+						const expected = (item.expectedOutput as string[]) || [];
+						return !expected.includes(this.IGNORE_DATASET_ITEMS_WITH_CATEGORY);
+					});
+					return filteredItems.map((item: any): Message => ({
 						id: item.id,
 						text: item.input?.text || item.input,
 						metadata: item.metadata,
@@ -261,7 +276,8 @@ export class RumorClassificationWorkflow extends WorkflowEntrypoint<Env, RumorCl
 				if (!message || !datasetItem) continue;
 
 				// Get expected categories from original dataset item
-				const expectedCategories = datasetItem.expectedOutput as string[]; // Always a list of category IDs
+				const rawExpectedCategories = (datasetItem.expectedOutput as string[]) || []; // Always a list of category IDs
+				const expectedCategories = rawExpectedCategories.filter(id => !this.SKIPPED_CATEGORY_IDS.has(id));
 
 				// Convert predicted category titles to category IDs for comparison
 				const predictedCategories = result.classification.categories.map((title: string) => categoryNameToId[title] || title).filter(Boolean);
