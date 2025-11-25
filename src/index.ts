@@ -3,109 +3,111 @@ import {
 	WorkflowEvent,
 	WorkflowStep,
 } from "cloudflare:workers";
+import { UrlResolverWorkflow } from "./workflows/url-resolver";
+import { ArticleClassifierWorkflow } from "./workflows/article-classifier";
 
-/**
- * Welcome to Cloudflare Workers! This is your first Workflows application.
- *
- * - Run `npm run dev` in your terminal to start a development server
- * - Open a browser tab at http://localhost:8787/ to see your Workflow in action
- * - Run `npm run deploy` to publish your application
- *
- * Learn more at https://developers.cloudflare.com/workflows
- */
- 
-// User-defined params passed to your Workflow
-type Params = {
-	email: string;
-	metadata: Record<string, string>;
-};
+export { UrlResolverWorkflow, ArticleClassifierWorkflow };
 
-export class MyWorkflow extends WorkflowEntrypoint<Env, Params> {
-	async run(event: WorkflowEvent<Params>, step: WorkflowStep) {
-		// Can access bindings on `this.env`
-		// Can access params on `event.payload`
+async function authenticate(req: Request, env: Env): Promise<boolean> {
+	const serviceTokenId = env.SERVICE_TOKEN_ID;
+	const serviceTokenSecret = env.SERVICE_TOKEN_SECRET;
 
-		const files = await step.do("my first step", async () => {
-			// Fetch a list of files from $SOME_SERVICE
-			return {
-				inputParams: event,
-				files: [
-					"doc_7392_rev3.pdf",
-					"report_x29_final.pdf",
-					"memo_2024_05_12.pdf",
-					"file_089_update.pdf",
-					"proj_alpha_v2.pdf",
-					"data_analysis_q2.pdf",
-					"notes_meeting_52.pdf",
-					"summary_fy24_draft.pdf",
-				],
-			};
-		});
-
-		// You can optionally have a Workflow wait for additional data,
-		// human approval or an external webhook or HTTP request, before progressing.
-		// You can submit data via HTTP POST to /accounts/{account_id}/workflows/{workflow_name}/instances/{instance_id}/events/{eventName}
-		const waitForApproval = await step.waitForEvent("request-approval", {
-			type: "approval", // define an optional key to switch on
-			timeout: "1 minute", // keep it short for the example!
-		});
-
-		const apiResponse = await step.do("some other step", async () => {
-			let resp = await fetch("https://api.cloudflare.com/client/v4/ips");
-			return await resp.json<any>();
-		});
-
-		await step.sleep("wait on something", "1 minute");
-
-		await step.do(
-			"make a call to write that could maybe, just might, fail",
-			// Define a retry strategy
-			{
-				retries: {
-					limit: 5,
-					delay: "5 second",
-					backoff: "exponential",
-				},
-				timeout: "15 minutes",
-			},
-			async () => {
-				// Do stuff here, with access to the state from our previous steps
-				if (Math.random() > 0.5) {
-					throw new Error("API call to $STORAGE_SYSTEM failed");
-				}
-			},
-		);
+	// If secrets are not set, fail closed (or open for dev? Better fail closed)
+	if (!serviceTokenId || !serviceTokenSecret) {
+		console.error("Service Token secrets are not set in environment");
+		return false;
 	}
+
+	const clientId = req.headers.get("CF-Access-Client-Id");
+	const clientSecret = req.headers.get("CF-Access-Client-Secret");
+
+	return clientId === serviceTokenId && clientSecret === serviceTokenSecret;
 }
+
 export default {
 	async fetch(req: Request, env: Env): Promise<Response> {
-		let url = new URL(req.url);
+		const url = new URL(req.url);
+		const path = url.pathname;
 
-		if (url.pathname.startsWith("/favicon")) {
-			return Response.json({}, { status: 404 });
+		// Health check or root
+		if (path === "/" || path === "/health") {
+			return Response.json({ status: "ok" });
 		}
 
-		// Get the status of an existing instance, if provided
-		// GET /?instanceId=<id here>
-		let id = url.searchParams.get("instanceId");
-		if (id) {
-			let instance = await env.MY_WORKFLOW.get(id);
-			return Response.json({
-				status: await instance.status(),
-			});
+		// Authentication check for /workflows/*
+		if (path.startsWith("/workflows/")) {
+			const isAuthenticated = await authenticate(req, env);
+			if (!isAuthenticated) {
+				return Response.json({ error: "Unauthorized" }, { status: 401 });
+			}
 		}
 
-		// Spawn a new instance and return the ID and status
-		let instance = await env.MY_WORKFLOW.create();
-		// You can also set the ID to match an ID in your own system
-		// and pass an optional payload to the Workflow
-		// let instance = await env.MY_WORKFLOW.create({
-		// 	id: 'id-from-your-system',
-		// 	params: { payload: 'to send' },
-		// });
-		return Response.json({
-			id: instance.id,
-			details: await instance.status(),
-		});
+		// Route: POST /workflows/:name
+		// Trigger a workflow
+		if (req.method === "POST" && path.startsWith("/workflows/")) {
+			const match = path.match(/\/workflows\/([^\/]+)$/);
+			if (match) {
+				const workflowName = match[1];
+				let workflowInstance;
+
+				try {
+					const payload = await req.json();
+
+					if (workflowName === "url-resolver") {
+						workflowInstance = await env.URL_RESOLVER.create({ params: payload });
+					} else if (workflowName === "article-classifier") {
+						workflowInstance = await env.ARTICLE_CLASSIFIER.create({ params: payload });
+					} else {
+						return Response.json({ error: "Workflow not found" }, { status: 404 });
+					}
+
+					return Response.json({
+						id: workflowInstance.id,
+						status: "started",
+						timestamp: new Date().toISOString(),
+					});
+				} catch (e: any) {
+					return Response.json({ error: e.message }, { status: 400 });
+				}
+			}
+		}
+
+		// Route: GET /workflows/:name/:id
+		// Get workflow status
+		if (req.method === "GET" && path.startsWith("/workflows/")) {
+			const match = path.match(/\/workflows\/([^\/]+)\/([^\/]+)$/);
+			if (match) {
+				const workflowName = match[1];
+				const instanceId = match[2];
+				let workflowBinding;
+
+				if (workflowName === "url-resolver") {
+					workflowBinding = env.URL_RESOLVER;
+				} else if (workflowName === "article-classifier") {
+					workflowBinding = env.ARTICLE_CLASSIFIER;
+				} else {
+					return Response.json({ error: "Workflow not found" }, { status: 404 });
+				}
+
+				try {
+					const instance = await workflowBinding.get(instanceId);
+					const status = await instance.status();
+
+					// If completed, we might want to include the output if available in status
+					// Status type usually has output if completed
+
+					return Response.json({
+						id: instance.id,
+						status: status.status,
+						output: status.output,
+						error: status.error,
+					});
+				} catch (e: any) {
+					return Response.json({ error: "Instance not found or error fetching status" }, { status: 404 });
+				}
+			}
+		}
+
+		return Response.json({ error: "Not Found" }, { status: 404 });
 	},
 };
