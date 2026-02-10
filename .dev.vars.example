@@ -1,0 +1,8 @@
+# Gemini API Key (required)
+# Get your API key from https://aistudio.google.com/apikey
+GEMINI_API_KEY=your-gemini-api-key-here
+
+# Langfuse (optional - for observability)
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_SECRET_KEY=
+LANGFUSE_HOST=

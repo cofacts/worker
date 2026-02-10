@@ -9,7 +9,11 @@
 		"cf-typegen": "wrangler types"
 	},
 	"devDependencies": {
+		"@cloudflare/puppeteer": "^1.0.6",
 		"typescript": "^5.0.4",
 		"wrangler": "^4.22.0"
+	},
+	"dependencies": {
+		"@google/genai": "^1.40.0"
 	}
 }

@@ -8,22 +8,6 @@ import { ArticleClassifierWorkflow } from "./workflows/article-classifier";
 
 export { UrlResolverWorkflow, ArticleClassifierWorkflow };
 
-async function authenticate(req: Request, env: Env): Promise<boolean> {
-	const serviceTokenId = env.SERVICE_TOKEN_ID;
-	const serviceTokenSecret = env.SERVICE_TOKEN_SECRET;
-
-	// If secrets are not set, fail closed (or open for dev? Better fail closed)
-	if (!serviceTokenId || !serviceTokenSecret) {
-		console.error("Service Token secrets are not set in environment");
-		return false;
-	}
-
-	const clientId = req.headers.get("CF-Access-Client-Id");
-	const clientSecret = req.headers.get("CF-Access-Client-Secret");
-
-	return clientId === serviceTokenId && clientSecret === serviceTokenSecret;
-}
-
 export default {
 	async fetch(req: Request, env: Env): Promise<Response> {
 		const url = new URL(req.url);
@@ -32,14 +16,6 @@ export default {
 		// Health check or root
 		if (path === "/" || path === "/health") {
 			return Response.json({ status: "ok" });
-		}
-
-		// Authentication check for /workflows/*
-		if (path.startsWith("/workflows/")) {
-			const isAuthenticated = await authenticate(req, env);
-			if (!isAuthenticated) {
-				return Response.json({ error: "Unauthorized" }, { status: 401 });
-			}
 		}
 
 		// Route: POST /workflows/:name

@@ -24,10 +24,11 @@
 		}
 	],
 	"vars": {
-		"SERVICE_TOKEN_ID": "",
-		"SERVICE_TOKEN_SECRET": "",
-		"OPENAI_API_KEY": "",
+		"GEMINI_API_KEY": "",
 		"RUMORS_API_URL": "https://api.cofacts.tw/graphql"
+	},
+	"browser": {
+		"binding": "BROWSER"
 	}
 	/**
 	 * Smart Placement
