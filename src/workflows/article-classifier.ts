@@ -93,6 +93,17 @@ ${articleText}`;
         model: "gemini-3-flash-preview",
         contents: prompt,
         config: {
+          responseSchema: {
+            type: "object" as const,
+            properties: {
+              categoryIds: {
+                type: "array" as const,
+                items: { type: "string" as const },
+              },
+              reasoning: { type: "string" as const },
+            },
+            required: ["categoryIds", "reasoning"],
+          },
           responseMimeType: "application/json",
         }
       });

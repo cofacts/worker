@@ -38,21 +38,29 @@ export class UrlResolverWorkflow extends WorkflowEntrypoint<Env, UrlResolverPara
     }, async () => {
       const ai = new GoogleGenAI({ apiKey: this.env.GEMINI_API_KEY });
 
-      const prompt = `Please analyze the following URL and extract:
-1. Canonical URL (the final URL after redirects and removing tracking parameters)
-2. Page title
-3. Main content summary (the full article text if possible, cleaned of navigation/ads)
-4. Representative image URL (OG image or main news photo)
+      const prompt = `Analyze this URL and extract the following information:
+- canonical: The canonical URL (after redirects, without tracking parameters)
+- title: The page title
+- summary: The main article content (full text, cleaned of navigation/ads)
+- topImageUrl: The main image URL (OG image or article photo)
 
-URL: ${url}
-
-Respond in JSON format with fields: canonical, title, summary, topImageUrl.`;
+URL: ${url}`;
 
       const response = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
         contents: prompt,
         config: {
           tools: [{ googleSearch: {} }],
+          responseSchema: {
+            type: "object" as const,
+            properties: {
+              canonical: { type: "string" as const },
+              title: { type: "string" as const },
+              summary: { type: "string" as const },
+              topImageUrl: { type: "string" as const },
+            },
+            required: ["canonical", "title", "summary", "topImageUrl"],
+          },
           responseMimeType: "application/json",
         },
       });
